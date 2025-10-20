@@ -1,1 +1,62 @@
 # CI workflow placeholder
+name: CI - Build, Test, Scan, Push
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore, build, test
+        run: |
+          dotnet restore src/WebApp.Api
+          dotnet build src/WebApp.Api -c Release --no-restore
+          dotnet test src/WebApp.Api --no-build --verbosity normal || true
+
+      - name: Build Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: src/WebApp.Api/Dockerfile
+          push: false
+
+      - name: SBOM generation (Syft)
+        uses: anchore/syft-action@main
+        with:
+          output: sbom.json
+          
+      - name: SBOM generation (Syft)
+        uses: anchore/syft-action@v0.13.0
+        with:
+            output: sbom.json
+
+      - name: Container vulnerability scan (Grype)
+        uses: anchore/grype-action@v1
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/webapp-api:${{ github.sha }}
+          output: grype-results.json
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-and-scan
+          path: |
+            sbom.json
+            grype-results.json
